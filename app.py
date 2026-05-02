@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data.knowledge_areas import KNOWLEDGE_AREAS
 from data.study_guides import STUDY_GUIDES
 from utils.state import init_session_state, get_progress_summary
+from utils.timers import get_exam_duration_minutes, get_exam_total_questions, format_duration
 
 # Page config
 st.set_page_config(
@@ -62,6 +63,13 @@ st.markdown("""
         color: #2563EB;
         font-weight: 500;
     }
+    .exam-banner {
+        background: linear-gradient(135deg, #2563EB 0%, #1E40AF 100%);
+        color: white;
+        padding: 1rem;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
     /* Make buttons larger for mobile */
     .stButton>button {
         min-height: 44px;
@@ -78,6 +86,18 @@ st.sidebar.markdown("---")
 st.markdown('<div class="main-header">📚 PMP Study Guides</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Your mobile-first PMP exam preparation companion</div>', unsafe_allow_html=True)
 
+# Official exam format banner
+st.markdown("""
+<div class="exam-banner">
+    <div style="font-size: 1.2rem; font-weight: 600;">🎯 Official PMP Exam Format</div>
+    <div style="margin-top: 0.5rem;">
+        {total_q} Questions | {duration} | Passing: ~61.5%<br>
+        <small>People 42% | Process 50% | Business Environment 8%</small><br>
+        <small style="color: #FEF08A;">⚠️ New weightings July 2026: People 33% | Process 41% | Business 26%</small>
+    </div>
+</div>
+""".format(total_q=get_exam_total_questions(), duration=format_duration(get_exam_duration_minutes())), unsafe_allow_html=True)
+
 # Progress summary
 progress = get_progress_summary()
 
@@ -88,7 +108,7 @@ with col1:
 with col2:
     st.metric("Questions", progress['questions_answered'])
 with col3:
-    st.metric("Flashcards", progress['flashcards_known'])
+    st.metric("Flashcards Known", progress['flashcards_known'])
 
 st.markdown("---")
 
@@ -120,4 +140,4 @@ for ka in KNOWLEDGE_AREAS:
 st.markdown("---")
 
 # Footer
-st.caption("Built with ❤️ for PMP candidates | PMBOK 6th & 7th Editions")
+st.caption("Built with ❤️ for PMP candidates | Based on PMBOK 6th & 7th Editions | Exam format per PMI.org")

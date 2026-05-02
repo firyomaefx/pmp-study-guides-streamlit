@@ -1,7 +1,7 @@
 import streamlit as st
 import time
 from data.mock_exams import MOCK_EXAMS
-from utils.scoring import calculate_score, is_passing, domain_breakdown
+from utils.scoring import calculate_score, is_passing, domain_breakdown, get_question_timing_guide
 from utils.state import save_progress
 from utils.timers import (
     get_exam_duration_minutes, 
@@ -32,13 +32,20 @@ if 'exam_start_time' not in st.session_state:
     st.session_state.exam_start_time = None
 if 'exam_elapsed' not in st.session_state:
     st.session_state.exam_elapsed = 0
+if 'break_1_taken' not in st.session_state:
+    st.session_state.break_1_taken = False
+if 'break_2_taken' not in st.session_state:
+    st.session_state.break_2_taken = False
+if 'break_active' not in st.session_state:
+    st.session_state.break_active = False
+if 'break_start_time' not in st.session_state:
+    st.session_state.break_start_time = None
 
 def start_exam(exam_idx):
     exam = MOCK_EXAMS[exam_idx]
     questions = exam.get('questions', [])
     
     # For demo, limit to 15 questions but simulate 180
-    # In production, this would be the full 180
     if len(questions) > 15:
         import random
         questions = random.sample(questions, 15)
@@ -51,13 +58,31 @@ def start_exam(exam_idx):
     st.session_state.exam_elapsed = 0
     st.session_state.exam_active = True
     st.session_state.exam_name = exam.get('name', f"Mock Exam {exam_idx + 1}")
+    st.session_state.break_1_taken = False
+    st.session_state.break_2_taken = False
+    st.session_state.break_active = False
+    st.session_state.break_start_time = None
+    st.rerun()
+
+def start_break():
+    st.session_state.break_active = True
+    st.session_state.break_start_time = time.time()
+    st.rerun()
+
+def end_break():
+    # Add break duration to exam elapsed (paused during break)
+    break_duration = int(time.time() - st.session_state.break_start_time)
+    # Adjust exam_start_time forward by break duration so timer doesn't count it
+    st.session_state.exam_start_time += break_duration
+    st.session_state.break_active = False
+    st.session_state.break_start_time = None
     st.rerun()
 
 def submit_exam():
     st.session_state.exam_submitted = True
     
     correct = sum(1 for ans in st.session_state.exam_answers.values() if ans.get('correct', False))
-    total = len(st.session_state.exam_questions)
+    total = len(st.session_state.exam_answers)
     score = calculate_score(correct, total)
     threshold = get_passing_threshold()
     
@@ -80,6 +105,10 @@ def reset_exam():
     st.session_state.exam_current_q = 0
     st.session_state.exam_start_time = None
     st.session_state.exam_elapsed = 0
+    st.session_state.break_1_taken = False
+    st.session_state.break_2_taken = False
+    st.session_state.break_active = False
+    st.session_state.break_start_time = None
     st.rerun()
 
 # Exam selection
@@ -135,6 +164,34 @@ if not st.session_state.exam_active:
 # Active exam
 else:
     if not st.session_state.exam_submitted:
+        # Check if on break
+        if st.session_state.break_active:
+            st.title("☕ Break Time")
+            st.subheader("Take a 10-minute break to recharge")
+            
+            # Break timer
+            break_elapsed = int(time.time() - st.session_state.break_start_time)
+            break_remaining = max(0, 600 - break_elapsed)  # 10 min = 600 sec
+            break_mins = break_remaining // 60
+            break_secs = break_remaining % 60
+            
+            if break_remaining <= 0:
+                st.warning("⏰ Break time is over!")
+            else:
+                st.info(f"⏱️ Break time remaining: {break_mins:02d}:{break_secs:02d}")
+            
+            st.markdown("**Recommended during break:**")
+            st.markdown("• 🚶 Stand up and stretch")
+            st.markdown("• 💧 Drink water")
+            st.markdown("• 🚻 Use restroom")
+            st.markdown("• 🧘 Take deep breaths")
+            st.markdown("• 🚫 Don't review exam content")
+            
+            if st.button("▶️ Resume Exam", use_container_width=True, type="primary"):
+                end_break()
+            
+            st.stop()
+        
         # Timer display
         if st.session_state.exam_start_time:
             st.session_state.exam_elapsed = int(time.time() - st.session_state.exam_start_time)
@@ -163,14 +220,74 @@ else:
             submit_exam()
             st.stop()
         
-        # Header
-        st.subheader(st.session_state.get('exam_name', 'Mock Exam'))
-        
+        # === PACING GUIDE ===
         total_q = len(st.session_state.exam_questions)
         answered = len(st.session_state.exam_answers)
+        current_q = st.session_state.exam_current_q + 1  # 1-indexed
+        
+        # Calculate pacing
+        timing = get_question_timing_guide()
+        time_per_q = timing['time_per_question']  # ~76.7 seconds
+        expected_time_used = current_q * time_per_q  # Expected time at this question
+        actual_time_used = st.session_state.exam_elapsed
+        
+        # Pace status
+        if actual_time_used < expected_time_used * 0.9:
+            pace_status = "🟢 AHEAD"
+            pace_color = "success"
+        elif actual_time_used < expected_time_used * 1.1:
+            pace_status = "🟡 ON TRACK"
+            pace_color = "info"
+        else:
+            pace_status = "🔴 BEHIND"
+            pace_color = "warning"
+        
+        # Show pacing guide
+        pace_min = int(actual_time_used // 60)
+        pace_secs = int(actual_time_used % 60)
+        expected_min = int(expected_time_used // 60)
+        expected_secs = int(expected_time_used % 60)
+        
+        with st.container():
+            st.markdown(f"""
+            <div style="background: #F0F9FF; border-left: 4px solid #0EA5E9; padding: 10px; border-radius: 4px; margin-bottom: 10px;">
+                <strong>📊 Pacing Guide</strong><br>
+                Q{current_q}/{total_q} | Time used: {pace_min}:{pace_secs:02d} | Expected: {expected_min}:{expected_secs:02d} | <strong>{pace_status}</strong><br>
+                <small>Target: ~{time_per_q:.0f} seconds per question | {timing['total_time']} min total</small>
+            </div>
+            """, unsafe_allow_html=True)
         
         # Progress
         st.progress(answered / total_q, text=f"Answered: {answered}/{total_q}")
+        
+        # === BREAK REMINDERS ===
+        # Break 1: After question 60 (or scaled for smaller exams)
+        break_1_trigger = max(1, int(total_q * (60 / 180)))
+        break_2_trigger = max(1, int(total_q * (120 / 180)))
+        
+        if current_q >= break_1_trigger and not st.session_state.break_1_taken:
+            st.success(f"🛑 **Break 1:** You've answered {current_q} questions. Take a 10-minute break?")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("☕ Take Break", use_container_width=True):
+                    st.session_state.break_1_taken = True
+                    start_break()
+            with col2:
+                if st.button("▶️ Continue", use_container_width=True):
+                    st.session_state.break_1_taken = True  # Mark as taken even if skipped
+                    st.rerun()
+        
+        elif current_q >= break_2_trigger and not st.session_state.break_2_taken:
+            st.success(f"🛑 **Break 2:** You've answered {current_q} questions. Take your final 10-minute break?")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("☕ Take Break", key="break2", use_container_width=True):
+                    st.session_state.break_2_taken = True
+                    start_break()
+            with col2:
+                if st.button("▶️ Continue", key="continue2", use_container_width=True):
+                    st.session_state.break_2_taken = True
+                    st.rerun()
         
         # Question navigator
         st.caption("Jump to question:")
@@ -272,7 +389,7 @@ else:
     else:
         # Results
         correct = sum(1 for ans in st.session_state.exam_answers.values() if ans.get('correct', False))
-        total = len(st.session_state.exam_questions)
+        total = len(st.session_state.exam_answers)
         score = calculate_score(correct, total)
         threshold = get_passing_threshold()
         passed = is_passing(score, threshold)
@@ -286,6 +403,18 @@ else:
             st.info(f"Passing score: {threshold}%")
         
         st.metric("Time Used", f"{elapsed_min} minutes", f"of {format_duration(get_exam_duration_minutes())}")
+        
+        # Pacing analysis
+        timing = get_question_timing_guide()
+        avg_time = st.session_state.exam_elapsed / total if total > 0 else 0
+        target_time = timing['time_per_question']
+        
+        if avg_time <= target_time * 1.1:
+            st.success(f"⏱️ Pacing: Good! Average {avg_time:.0f}s/question (target: {target_time:.0f}s)")
+        elif avg_time <= target_time * 1.3:
+            st.warning(f"⏱️ Pacing: Slow. Average {avg_time:.0f}s/question (target: {target_time:.0f}s)")
+        else:
+            st.error(f"⏱️ Pacing: Too slow! Average {avg_time:.0f}s/question (target: {target_time:.0f}s)")
         
         # Domain breakdown
         answers_list = [
